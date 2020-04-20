@@ -123,11 +123,13 @@ public class DelayUtil {
                         	System.out.println(headers.get("x-death"));
                             if (headers.containsKey("x-death")) {
                                 List<Map<String, Object>> deaths = (List<Map<String, Object>>) headers.get("x-death");
+                                
                                 if (deaths.size() > 0) {
                                     Map<String, Object> death = deaths.get(0);
                                     retryCount = (Long) death.get("count");
 //                                    System.out.println("cishu:"+retryCount);
 //                                    death.put("count", retryCount+1);
+                                    System.out.println("queue:"+death.get("queue"));
                                 }
                             }
                         }
@@ -153,7 +155,8 @@ public class DelayUtil {
         				
         				//判断是否还可以有下次重试
         				if(failureRetryDelaySecends.length == 0){
-        					//没有设置失败重试，那么无需再重复投递
+        					//没有设置失败重试，那么无需再重复投递,直接调用处理失败接口
+        					receiveInterface.failure(msg);
         				}else{
         					//设置了消费失败重试，重复投递消息
         					
@@ -195,29 +198,47 @@ public class DelayUtil {
 	}
 	
 	
-	private String failureRetryTemporaryQueueName = null;
+//	private String failureRetryTemporaryQueueName = null;
 	/**
 	 * 消息消费失败，重试，重新投递到延迟队列中
 	 * @param msg 要发送的消息字符串
 	 * @param delayTime 延迟时间，单位是秒
 	 */
 	public void failureRetry(BasicProperties properties, byte[] body) throws Exception{
-		System.out.println("failureRetry");
-		//重新投递的死信队列
-        if(failureRetryTemporaryQueueName == null){
-        	//创建一个
-        	HashMap<String, Object> arguments = new HashMap<String, Object>();
-            arguments.put("x-dead-letter-exchange", exchangeName);
-            arguments.put("x-dead-letter-routing-key", "message_ttl_routingKey");
-            failureRetryTemporaryQueueName = "wangmarket."+"failureRetry."+UUID.randomUUID().toString();
-    		getChannel().queueDeclare(failureRetryTemporaryQueueName, true, false, false, arguments);
-    		System.out.println(failureRetryTemporaryQueueName);
-        }
+//		System.out.println("failureRetry");
+//		//重新投递的死信队列
+//        if(failureRetryTemporaryQueueName == null){
+//        	//创建一个
+//        	HashMap<String, Object> arguments = new HashMap<String, Object>();
+//            arguments.put("x-dead-letter-exchange", exchangeName);
+//            arguments.put("x-dead-letter-routing-key", "message_ttl_routingKey");
+//            failureRetryTemporaryQueueName = "wangmarket."+"failureRetry."+UUID.randomUUID().toString();
+//    		getChannel().queueDeclare(failureRetryTemporaryQueueName, true, false, false, arguments);
+//    		System.out.println(failureRetryTemporaryQueueName);
+//        }
 		
+        Map<String, Object> headers = null;
+        String delayQueue = null;	//死信队列，用来做延迟的，将消息重新投递到这里
+        try {
+            headers = properties.getHeaders();
+            if (headers != null) {
+                if (headers.containsKey("x-death")) {
+                    List<Map<String, Object>> deaths = (List<Map<String, Object>>) headers.get("x-death");
+                    if (deaths.size() > 0) {
+                    	Map<String, Object> death = deaths.get(0);
+                    	delayQueue = death.get("queue").toString();
+                        System.out.println("queue:"+delayQueue);
+                    }
+                }
+            }
+        } catch (Exception e) {
+        	e.printStackTrace();
+        }
+        
 //		getChannel().queueDeclare(queueDelayName, true, false, false, args);
 		// 当声明队列，不加任何参数，产生的将是一个临时队列，getQueue返回的是队列名称
 //        String temporaryQueueName = getChannel().queueDeclare().getQueue();
         //getChannel().queueDeclare(temporaryQueueName, true, false, false, null);
-		getChannel().basicPublish("", failureRetryTemporaryQueueName, properties, body);
+		getChannel().basicPublish("", delayQueue, properties, body);
 	}
 }

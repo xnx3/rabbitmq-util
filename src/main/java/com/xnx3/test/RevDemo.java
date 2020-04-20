@@ -17,7 +17,7 @@ import com.xnx3.rabbitmq.interfaces.DelayReceiveInterface;
 public class RevDemo {
     public static void main(String[] args) throws Exception {
         
-    	DelayUtil delay = new DelayUtil("a");
+    	DelayUtil delay = new DelayUtil("n");
 		delay.setFailureRetryDelaySecends(new int[]{1});
 		
 		try {

@@ -10,8 +10,9 @@ public class Test {
 	
 	public static void main(String[] args) {
 		DelayUtil delay = new DelayUtil("hha");
+		delay.setFailureRetryDelaySecends(new int[]{1});
 		try {
-			delay.send("c7",3);
+			delay.send("c9",3);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
