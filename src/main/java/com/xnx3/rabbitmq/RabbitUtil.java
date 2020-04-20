@@ -22,8 +22,6 @@ public class RabbitUtil {
     public Connection connection = null;	//链接
     public Channel channel = null;	//通道
     
-    
-    
     /**
      * 初始化，即不设置RabbitMQ的相关信息，使用默认的，即 guest 账户及 5672端口
      */
