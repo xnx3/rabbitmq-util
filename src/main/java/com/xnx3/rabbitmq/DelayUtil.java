@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import com.rabbitmq.client.AMQP;
+import com.rabbitmq.client.AMQP.BasicProperties;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Consumer;
 import com.rabbitmq.client.DefaultConsumer;
@@ -19,19 +21,18 @@ import com.xnx3.rabbitmq.interfaces.DelayReceiveInterface;
  *
  */
 public class DelayUtil {
-	public String queueNormalName;	//正常的，接收消息通知的队列
-	public String queueDelayName;	//死信队列，用来做延迟的队列，延迟完后会将消息加入到 queueNormalName 再被消费
+	public String queueNormalName;	//正常的，接收消息通知的队列，用来消费消息
+//	public String queueDelayName;	//死信队列，用来做延迟的队列，延迟完后会将消息加入到 queueNormalName 再被消费
 	public int[] failureRetryDelaySecends;	//执行失败后重试，所延迟等待的秒数，延迟多长时间后重试。数组形式存在，单位是秒。如 [1,5,10] 则是执行失败后，1秒钟后重试一次，若还是失败，则5秒钟后再执行一次，如果还是失败，则10秒钟后再执行一次
-	
+	public String exchangeName = "amq.direct";//wangmarket_delay_exchange_name
 	
 	/**
 	 * 延时执行。
 	 * @param queueNormalName 正常的，接收消息通知的队列的名字，如 wangmarket
 	 * @param queueDelayName 死信队列的名字，用来做延迟的队列，延迟完后会将消息加入到 queueNormalName 再被消费。如 wangmarket_delay
 	 */
-	public DelayUtil(String queueNormalName, String queueDelayName) {
+	public DelayUtil(String queueNormalName) {
 		this.queueNormalName = queueNormalName;
-		this.queueDelayName = queueDelayName;
 		this.failureRetryDelaySecends = new int[]{};
 	}
 	
@@ -41,7 +42,6 @@ public class DelayUtil {
 	 */
 	public DelayUtil() {
 		this.queueNormalName = "wangmarket_delay_mq_normal_queue";
-		this.queueDelayName = queueNormalName + "_delay";
 		this.failureRetryDelaySecends = new int[]{};
 	}
 	
@@ -80,26 +80,24 @@ public class DelayUtil {
 	public void send(String msg, int delayTime) throws Exception{
 		// 死信队列
 		Map<String, Object> args = new HashMap<String, Object>();
-		args.put("x-dead-letter-exchange", "amq.direct");
+		args.put("x-dead-letter-exchange", exchangeName);
 		args.put("x-dead-letter-routing-key", "message_ttl_routingKey");
+		String temporaryQueueName = "wangmarket."+UUID.randomUUID().toString();
+		System.out.println(temporaryQueueName);
+		getChannel().queueDeclare(temporaryQueueName, true, false, false, args);
 		
-		getChannel().queueDeclare(queueDelayName, true, false, false, args);
- 
 		// 声明死信处理队列
 		getChannel().queueDeclare(queueNormalName, true, false, false, null);
-		// 当声明队列，不加任何参数，产生的将是一个临时队列，getQueue返回的是队列名称
-//        String temporaryQueueName = getChannel().queueDeclare().getQueue();
-//        getChannel().queueDeclare(temporaryQueueName, true, false, false, null);
 		
 		// 绑定路由
-		getChannel().queueBind(queueNormalName, "amq.direct", "message_ttl_routingKey");
-//		getChannel().queueBind(temporaryQueueName, "amq.direct", "message_ttl_routingKey");
+		getChannel().queueBind(queueNormalName, exchangeName, "message_ttl_routingKey");
 		AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
 		// 延时2秒，测试-1秒
 		System.out.println((delayTime*1000)+"");
 		AMQP.BasicProperties properties = builder.expiration((delayTime*1000)+"").deliveryMode(2).build();
-		getChannel().basicPublish("", queueDelayName, properties, msg.getBytes());
+		getChannel().basicPublish("", temporaryQueueName, properties, msg.getBytes());
 		System.out.println("msg推送完毕:"+msg);
+		
 	}
 	
 	/**
@@ -108,20 +106,10 @@ public class DelayUtil {
 	 * @throws IOException
 	 */
 	public void receive(final DelayReceiveInterface receiveInterface) throws IOException{
-		getChannel().queueDeclare(queueNormalName, true, false, false, null);
-
-        // 死信队列
-        HashMap<String, Object> arguments = new HashMap<String, Object>();
-        arguments.put("x-dead-letter-exchange", "amq.direct");
-        arguments.put("x-dead-letter-routing-key", "message_ttl_routingKey");
-
-//        getChannel().queueDeclare(RabbitMQ.delay_qName, true, false, false, arguments);
-        getChannel().queueDeclare(queueDelayName, true, false, false, arguments);
-        
-        // 声明死信处理队列
+        // 声明消息接收处理的队列
         getChannel().queueDeclare(queueNormalName, true, false, false, null);
         // 绑定路由
-        getChannel().queueBind(queueNormalName, "amq.direct", "message_ttl_routingKey");
+        getChannel().queueBind(queueNormalName, exchangeName, "message_ttl_routingKey");
 
         Consumer consumer = new DefaultConsumer(getChannel()) {
             @Override
@@ -176,7 +164,12 @@ public class DelayUtil {
                 				System.out.println("retryCount:"+retryCount+","+"delayTime:"+delayTime);
                 				properties = properties.builder().expiration(delayTime+"").build();	//延迟秒数设定
 //                        		getChannel().basicPublish("", RabbitMQ.delay_qName, properties, body);
-                        		getChannel().basicPublish("", queueDelayName, properties, body);
+//                        		getChannel().basicPublish("", queueDelayName, properties, body);
+                				try {
+									failureRetry(properties, body);
+								} catch (Exception e) {
+									e.printStackTrace();
+								}
 //                        		getChannel().basicNack(envelope.getDeliveryTag(), false, false);
             				}else{
             					//不再有下一次了，直接删除掉，消费掉
@@ -201,4 +194,30 @@ public class DelayUtil {
         System.out.println("创建接收监听");
 	}
 	
+	
+	private String failureRetryTemporaryQueueName = null;
+	/**
+	 * 消息消费失败，重试，重新投递到延迟队列中
+	 * @param msg 要发送的消息字符串
+	 * @param delayTime 延迟时间，单位是秒
+	 */
+	public void failureRetry(BasicProperties properties, byte[] body) throws Exception{
+		System.out.println("failureRetry");
+		//重新投递的死信队列
+        if(failureRetryTemporaryQueueName == null){
+        	//创建一个
+        	HashMap<String, Object> arguments = new HashMap<String, Object>();
+            arguments.put("x-dead-letter-exchange", exchangeName);
+            arguments.put("x-dead-letter-routing-key", "message_ttl_routingKey");
+            failureRetryTemporaryQueueName = "wangmarket."+"failureRetry."+UUID.randomUUID().toString();
+    		getChannel().queueDeclare(failureRetryTemporaryQueueName, true, false, false, arguments);
+    		System.out.println(failureRetryTemporaryQueueName);
+        }
+		
+//		getChannel().queueDeclare(queueDelayName, true, false, false, args);
+		// 当声明队列，不加任何参数，产生的将是一个临时队列，getQueue返回的是队列名称
+//        String temporaryQueueName = getChannel().queueDeclare().getQueue();
+        //getChannel().queueDeclare(temporaryQueueName, true, false, false, null);
+		getChannel().basicPublish("", failureRetryTemporaryQueueName, properties, body);
+	}
 }
