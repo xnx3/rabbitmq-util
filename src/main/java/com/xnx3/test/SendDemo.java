@@ -13,11 +13,12 @@ import com.xnx3.rabbitmq.DelayUtil;
 public class SendDemo {
 	
 	public static void main(String[] args) throws Exception {
-		DelayUtil delay = new DelayUtil("n");
+		DelayUtil delay = new DelayUtil();
 		try {
-			for (int i = 0; i < 10; i++) {
-				delay.send("n"+i,3);
-			}
+//			for (int i = 0; i < 10; i++) {
+//				delay.send("n"+i,3);
+//			}
+			delay.send("m1",2);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}

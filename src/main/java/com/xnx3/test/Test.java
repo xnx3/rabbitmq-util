@@ -8,11 +8,11 @@ import com.xnx3.rabbitmq.interfaces.DelayReceiveInterface;
 
 public class Test {
 	
-	public static void main(String[] args) {
-		DelayUtil delay = new DelayUtil("hha");
+	public static void main(String[] args) throws IOException {
+		DelayUtil delay = new DelayUtil("w");
 		delay.setFailureRetryDelaySecends(new int[]{1});
 		try {
-			delay.send("c9",3);
+			delay.send("w",3);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
