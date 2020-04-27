@@ -25,6 +25,7 @@ public class DelayUtil {
 	public String name;	//正常的，接收消息延迟到期后过来的消息，通知的队列，用来消费消息
 	public int[] failureRetryDelaySecends;	//执行失败后重试，所延迟等待的秒数，延迟多长时间后重试。数组形式存在，单位是秒。如 [1,5,10] 则是执行失败后，1秒钟后重试一次，若还是失败，则5秒钟后再执行一次，如果还是失败，则10秒钟后再执行一次
 	private String routingKey = "message_ttl_routingKey";
+	private RabbitUtil rabbitUtil;	//rabbitUtil 的工具类
 	
 	//用来进行延迟消息的队列跟交换机，发送的消息先进入这里进行延迟，延迟结束之后，在投递到 consumeExchangeName
 	private String delayQueueName;
@@ -36,13 +37,16 @@ public class DelayUtil {
 	
 	/**
 	 * 延时执行。
-	 * @param queueNormalName 正常的，接收消息通知的队列的名字，如 wangmarket
-	 * @param queueDelayName 死信队列的名字，用来做延迟的队列，延迟完后会将消息加入到 queueNormalName 再被消费。如 wangmarket_delay
+	 * @param name 延迟队列的标识，名字。同一个名字，即使是 new 了多个 DelayUtil ，也都是同一个消息通道。
+	 * @param rabbitUtil rabbit的一些配置信息。传入如： 
+	 * <pre>
+	 * 	new RabbitUtil("114.116.216.206", "admin", "12345678", 5672);
+	 * </pre>
 	 * @throws IOException 
 	 */
-	public DelayUtil(String name) throws IOException {
+	public DelayUtil(String name, RabbitUtil rabbitUtil) throws IOException {
 		this.name = name;
-		this.failureRetryDelaySecends = new int[]{};
+		this.rabbitUtil = rabbitUtil;
 		setParam();
 		//声明来接收消息的交换机跟队列,这里放在创建接收回调时再创建
 //		declareConsumeQueueAndExchange();
@@ -51,13 +55,16 @@ public class DelayUtil {
 	}
 	
 	/**
-	 * 延时执行。
-	 * queueNormalName 、 queueDelayName 是默认的 wangmarket_delay_mq_normal_queue 、 wangmarket_delay_mq_normal_queue_delay
+	 * 延时执行。单项目使用，非分布式的使用
+	 * @param rabbitUtil rabbit的一些配置信息。传入如： 
+	 * <pre>
+	 * 	new RabbitUtil("114.116.216.206", "admin", "12345678", 5672);
+	 * </pre>
 	 * @throws IOException 
 	 */
-	public DelayUtil() throws IOException {
+	public DelayUtil(RabbitUtil rabbitUtil) throws IOException {
+		this.rabbitUtil = rabbitUtil;
 		this.name = "wangmarket_delaymq_default_queue";
-		this.failureRetryDelaySecends = new int[]{};
 		setParam();
 		//声明来接收消息的交换机跟队列
 //		declareConsumeQueueAndExchange();
@@ -78,6 +85,9 @@ public class DelayUtil {
 		
 		//设置路由
 		this.routingKey = name+"_delay_routingKey";
+		
+		//设置默认的消息重试延迟时间
+		this.failureRetryDelaySecends = new int[]{};
 	}
 	
 	/**
@@ -116,7 +126,7 @@ public class DelayUtil {
 	public Channel getOpenChannel(){
 		if(channel == null || !channel.isOpen()){
 			try {
-				channel = RabbitMQ.rabbit.getConnection().createChannel();
+				channel = this.rabbitUtil.getConnection().createChannel();
 			} catch (IOException e) {
 				e.printStackTrace();
 			} catch (TimeoutException e) {
@@ -130,7 +140,7 @@ public class DelayUtil {
 	 * 设置消息消费失败后，延迟多长时间后再消费。延迟的时间以此延迟多少次，便是通过这里设置的。
 	 * <br/>默认如果不设置，消息只会消费一次，无论消息是消费成功还是失败，都只是消费一次。设置这里之后，如果消费失败，会延迟一段时间后进行重新消费
 	 * @param failureRetryDelaySecends 每次延迟的时间，以及延迟多少次。传入数组形式。
-	 * 		<br/>例如,传入 new int[]{5,30,300}  则是如果消息在 {@link #receive(DelayReceiveInterface)} 中消费失败，处理失败，那么延迟5秒钟后，会进行第二次消费此消息，如果还是失败，那么再延迟30秒后，第三次消费消息。 如果第三次还是消费失败，那么延迟300秒后，第四次消费消息。
+	 * 		<br/>例如,传入 <pre> new int[]{5,30,300} </pre> 则是如果消息在 {@link #receive(DelayReceiveInterface)} 中消费失败，处理失败，那么延迟5秒钟后，会进行第二次消费此消息，如果还是失败，那么再延迟30秒后，第三次消费消息。 如果第三次还是消费失败，那么延迟300秒后，第四次消费消息。
 	 */
 	public void setFailureRetryDelaySecends(int[] failureRetryDelaySecends) {
 		this.failureRetryDelaySecends = failureRetryDelaySecends;
@@ -142,7 +152,7 @@ public class DelayUtil {
 	 * @param msg 要发送的消息字符串
 	 * @param delayTime 延迟时间，单位是秒
 	 */
-	public void send(String msg, int delayTime) throws Exception{
+	public void send(String msg, int delayTime) throws IOException{
 		send(msg, delayTime,1);
 	}
 	private void send(String msg, int delayTime, int count) throws IOException{
@@ -176,7 +186,6 @@ public class DelayUtil {
                             if (headers != null) {
                             	if(headers.get("receivecount") != null){
                             		receivecount = (Integer) headers.get("receivecount");
-                            		System.out.println("receivecount:"+receivecount);
                             	}
                             }
                         } catch (Exception e) {
@@ -185,43 +194,45 @@ public class DelayUtil {
                 	}
                 	
                 	String msg = new String(body, "UTF-8");
-                	System.out.println(receivecount+","+(failureRetryDelaySecends.length)+" --- "+envelope.getDeliveryTag());
                 	if(receivecount <= failureRetryDelaySecends.length+1){
                 		// requeue：重新入队列，true: 重新放入队列
                 		
-            			if(receiveInterface.dispose(msg)){
+                		boolean receiveResult = false;
+                		try {
+                			receiveResult = receiveInterface.dispose(msg, receivecount);
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
+            			if(receiveResult){
             				//返回true，那么处理正常，删除这条消息
             				getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
             			}else{
             				//返回false，那么处理失败，将这条消息重新投递到死信队列
             				
             				//判断是否还可以有下次重试
-            				if(failureRetryDelaySecends.length == 0){
-            					//没有设置失败重试，那么无需再重复投递,直接调用处理失败接口
-            					receiveInterface.failure(msg);
+            				if(receivecount <= failureRetryDelaySecends.length){
+            					//还可以有下一次，将消息在发出去
+            					int delayTime = failureRetryDelaySecends[(int)(receivecount-1)];
+                				properties = properties.builder().expiration(delayTime+"").build();	//延迟秒数设定
+                				send(msg, delayTime, receivecount+1);
             				}else{
-            					//设置了消费失败重试，重复投递消息
-            					
-            					//retryCount 为重复投递的次数，例如第一次消费，retryCount为1，失败，重新投递一次，那么这里接收到还是1，又失败，在投递一次，这里就变成了2
-            					if(receivecount <= failureRetryDelaySecends.length){
-                					//还可以有下一次，将消息在发出去
-                					int delayTime = failureRetryDelaySecends[(int)(receivecount-1)];
-                    				System.out.println("receivecount:"+receivecount+","+"delayTime:"+delayTime);
-                    				properties = properties.builder().expiration(delayTime+"").build();	//延迟秒数设定
-                    				send(msg, delayTime, receivecount+1);
-                				}else{
-                					//不再有下一次了，直接删除掉，消费掉
-                					System.out.println("去掉这条消息:"+msg);
-                					receiveInterface.failure(msg);
-                            		// 确认收到消息并处理完成，删除这条消息
-                					getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
-                				}
+            					//不再有下一次了，直接删除掉，消费掉
+            					try {
+            						receiveInterface.failure(msg);
+								} catch (Exception e) {
+									e.printStackTrace();
+								}
+                        		// 确认收到消息并处理完成，删除这条消息
+            					getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
             				}
             			}
                 	}else{
                 		//超过最大重试此处，那么这条消息丢弃掉，也就是标注为处理完成，删除这条消息。正常来说，这个不应该存在的，多判断一下吧
-                		System.out.println("删除这条消息:"+msg);
-                		receiveInterface.failure(msg);
+                		try {
+    						receiveInterface.failure(msg);
+						} catch (Exception e) {
+							e.printStackTrace();
+						}
                 		// 确认收到消息并处理完成，删除这条消息
                 		getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
                 	}
@@ -232,6 +243,5 @@ public class DelayUtil {
         };
         // 打开消息应答，不自动确认接收消息，手动确认接收到消息
         getOpenChannel().basicConsume(this.consumeQueueName, false, consumer);
-        System.out.println("创建接收监听");
 	}
 }
