@@ -2,12 +2,9 @@ package com.xnx3.rabbitmq;
 
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.TimeoutException;
 import com.rabbitmq.client.AMQP;
-import com.rabbitmq.client.AMQP.BasicProperties;
 import com.rabbitmq.client.BuiltinExchangeType;
 import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.Consumer;
@@ -18,6 +15,9 @@ import com.xnx3.rabbitmq.interfaces.DelayReceiveInterface;
 /**
  * 延时执行。
  * 比如指定一个消息，延迟10秒后才会被接收
+ * 
+ * 使用说明：
+ * 需要先创建消费者 {@link #receive(DelayReceiveInterface)} ，再创建生产者 {@link #send(String, int)} ,如果先生产，再创建消费者，时间上会出问题，导致消费者接收不到消息
  * @author 管雷鸣
  *
  */
@@ -44,9 +44,9 @@ public class DelayUtil {
 		this.name = name;
 		this.failureRetryDelaySecends = new int[]{};
 		setParam();
-		//声明来接收消息的交换机跟队列
+		//声明来接收消息的交换机跟队列,这里放在创建接收回调时再创建
 //		declareConsumeQueueAndExchange();
-//		//声明用来延迟消息的交换机、队列
+		//声明用来延迟消息的交换机、队列
 		declareDelayQueueAndExchange();
 	}
 	
@@ -56,7 +56,7 @@ public class DelayUtil {
 	 * @throws IOException 
 	 */
 	public DelayUtil() throws IOException {
-		this.name = "wangmarket__delaymq_default_queue";
+		this.name = "wangmarket_delaymq_default_queue";
 		this.failureRetryDelaySecends = new int[]{};
 		setParam();
 		//声明来接收消息的交换机跟队列
@@ -72,8 +72,12 @@ public class DelayUtil {
 		this.delayQueueName = "delay_"+this.name+"_queue";
 		this.delayExchangeName = "delay_"+this.name+"_exchange";
 		this.consumeQueueName = "consume_"+this.name+"_queue";
-		this.consumeExchangeName = "consume_"+this.name+"_exchange";
-//		this.routingKey = "routingkey_"+this.name;
+//		this.consumeExchangeName = "consume_"+this.name+"_exchange";
+		//用存在的 amq.direct 
+		this.consumeExchangeName = "amq.direct";
+		
+		//设置路由
+		this.routingKey = name+"_delay_routingKey";
 	}
 	
 	/**
@@ -81,13 +85,12 @@ public class DelayUtil {
 	 * @throws IOException
 	 */
 	private void declareConsumeQueueAndExchange() throws IOException{
-//		this.consumeExchangeName = "amq.direct";
 		//队列
-		getChannel().queueDeclare(this.consumeQueueName, true, false, false, null);	
+		getOpenChannel().queueDeclare(this.consumeQueueName, true, false, false, null);	
 		//交换机
-		getChannel().exchangeDeclare(this.consumeExchangeName, BuiltinExchangeType.DIRECT);
-		// 绑定路由
-        getChannel().queueBind(this.consumeQueueName, this.consumeExchangeName, routingKey);
+//		getOpenChannel().exchangeDeclare(this.consumeExchangeName, BuiltinExchangeType.DIRECT);
+		//绑定路由
+		getOpenChannel().queueBind(this.consumeQueueName, this.consumeExchangeName, routingKey);
 	}
 	
 	/**
@@ -95,29 +98,23 @@ public class DelayUtil {
 	 * @throws IOException
 	 */
 	private void declareDelayQueueAndExchange() throws IOException{
-//		String id = UUID.randomUUID()+"";
-//		this.delayQueueName = id+"_queue";
-//        this.delayExchangeName = id + "_exchange";
-//        this.delayExchangeName = "amq.direct";
-		
 		// 用来延迟的队列
 		Map<String, Object> args = new HashMap<String, Object>();
 		args.put("x-dead-letter-exchange", this.consumeExchangeName);
 		args.put("x-dead-letter-routing-key", routingKey);
-		getChannel().queueDeclare(this.delayQueueName, true, false, false, args);	//创建队列
-		getChannel().exchangeDeclare(this.delayExchangeName, BuiltinExchangeType.DIRECT);	//创建延迟队列的交换机
+		getOpenChannel().queueDeclare(this.delayQueueName, true, false, false, args);	//创建队列
+		getOpenChannel().exchangeDeclare(this.delayExchangeName, BuiltinExchangeType.DIRECT);	//创建延迟队列的交换机
 		// 绑定路由
-		getChannel().queueBind(this.delayQueueName, this.delayExchangeName, routingKey);
-
+		getOpenChannel().queueBind(this.delayQueueName, this.delayExchangeName, routingKey);
 		System.out.println("创建临时队列："+this.delayQueueName);
 	}
 	
 	private Channel channel;
 	/**
-	 * 获取一个通道
+	 * 获取一个打开的通道
 	 */
-	public Channel getChannel(){
-		if(channel == null){
+	public Channel getOpenChannel(){
+		if(channel == null || !channel.isOpen()){
 			try {
 				channel = RabbitMQ.rabbit.getConnection().createChannel();
 			} catch (IOException e) {
@@ -146,11 +143,16 @@ public class DelayUtil {
 	 * @param delayTime 延迟时间，单位是秒
 	 */
 	public void send(String msg, int delayTime) throws Exception{
+		send(msg, delayTime,1);
+	}
+	private void send(String msg, int delayTime, int count) throws IOException{
+		Map<String, Object> headers = new HashMap<String, Object>();
+		headers.put("receivecount", count);
+		headers.put("delay_exchange_name", this.delayExchangeName);
 		AMQP.BasicProperties.Builder builder = new AMQP.BasicProperties.Builder();
 		// 延时2秒，测试-1秒
-		AMQP.BasicProperties properties = builder.expiration((delayTime*1000)+"").deliveryMode(2).build();
-		getChannel().basicPublish(this.delayExchangeName, this.routingKey, properties, msg.getBytes());
-		System.out.println("msg推送完毕:"+msg);
+		AMQP.BasicProperties properties = builder.expiration((delayTime*1000)+"").deliveryMode(2).headers(headers).build();
+		getOpenChannel().basicPublish(this.delayExchangeName, this.routingKey, properties, msg.getBytes());
 	}
 	
 	/**
@@ -161,27 +163,21 @@ public class DelayUtil {
 	public void receive(final DelayReceiveInterface receiveInterface) throws IOException{
 		//声明用来接收延迟消息的交换机、队列
 		declareConsumeQueueAndExchange();
-				
-		Consumer consumer = new DefaultConsumer(getChannel()) {
+		
+		Consumer consumer = new DefaultConsumer(getOpenChannel()) {
             @Override
             public void handleDelivery(String consumerTag, Envelope envelope, AMQP.BasicProperties properties, byte[] body) throws IOException {
             	try {
-
-                	long retryCount = 1;
+                	int receivecount = 1;	//此条消息的接收次数，是第几次接收这个消息。默认为1，第一次接收
                 	Map<String, Object> headers = null;
                 	if(failureRetryDelaySecends.length > 0){
                     	try {
                             headers = properties.getHeaders();
                             if (headers != null) {
-                            	System.out.println(headers.get("x-death"));
-                                if (headers.containsKey("x-death")) {
-                                    List<Map<String, Object>> deaths = (List<Map<String, Object>>) headers.get("x-death");
-                                    
-                                    if (deaths.size() > 0) {
-                                        Map<String, Object> death = deaths.get(0);
-                                        retryCount = (Long) death.get("count");
-                                    }
-                                }
+                            	if(headers.get("receivecount") != null){
+                            		receivecount = (Integer) headers.get("receivecount");
+                            		System.out.println("receivecount:"+receivecount);
+                            	}
                             }
                         } catch (Exception e) {
                         	e.printStackTrace();
@@ -189,13 +185,13 @@ public class DelayUtil {
                 	}
                 	
                 	String msg = new String(body, "UTF-8");
-                	System.out.println(retryCount+","+(failureRetryDelaySecends.length)+" --- "+envelope.getDeliveryTag());
-                	if(retryCount <= failureRetryDelaySecends.length+1){
+                	System.out.println(receivecount+","+(failureRetryDelaySecends.length)+" --- "+envelope.getDeliveryTag());
+                	if(receivecount <= failureRetryDelaySecends.length+1){
                 		// requeue：重新入队列，true: 重新放入队列
                 		
             			if(receiveInterface.dispose(msg)){
             				//返回true，那么处理正常，删除这条消息
-            				getChannel().basicAck(envelope.getDeliveryTag(), false);
+            				getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
             			}else{
             				//返回false，那么处理失败，将这条消息重新投递到死信队列
             				
@@ -207,22 +203,18 @@ public class DelayUtil {
             					//设置了消费失败重试，重复投递消息
             					
             					//retryCount 为重复投递的次数，例如第一次消费，retryCount为1，失败，重新投递一次，那么这里接收到还是1，又失败，在投递一次，这里就变成了2
-            					if(retryCount <= failureRetryDelaySecends.length){
+            					if(receivecount <= failureRetryDelaySecends.length){
                 					//还可以有下一次，将消息在发出去
-                					int delayTime = failureRetryDelaySecends[(int)(retryCount-1)]*1000;
-                    				System.out.println("retryCount:"+retryCount+","+"delayTime:"+delayTime);
+                					int delayTime = failureRetryDelaySecends[(int)(receivecount-1)];
+                    				System.out.println("receivecount:"+receivecount+","+"delayTime:"+delayTime);
                     				properties = properties.builder().expiration(delayTime+"").build();	//延迟秒数设定
-                    				try {
-    									failureRetry(properties, body);
-    								} catch (Exception e) {
-    									e.printStackTrace();
-    								}
+                    				send(msg, delayTime, receivecount+1);
                 				}else{
                 					//不再有下一次了，直接删除掉，消费掉
                 					System.out.println("去掉这条消息:"+msg);
                 					receiveInterface.failure(msg);
                             		// 确认收到消息并处理完成，删除这条消息
-                					getChannel().basicAck(envelope.getDeliveryTag(), false);
+                					getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
                 				}
             				}
             			}
@@ -231,51 +223,15 @@ public class DelayUtil {
                 		System.out.println("删除这条消息:"+msg);
                 		receiveInterface.failure(msg);
                 		// 确认收到消息并处理完成，删除这条消息
-                		getChannel().basicAck(envelope.getDeliveryTag(), false);
+                		getOpenChannel().basicAck(envelope.getDeliveryTag(), false);
                 	}
-                
 				} catch (Exception e) {
 					e.printStackTrace();
 				}
             }
         };
-        // 打开消息应答机制
-        getChannel().basicConsume(this.consumeQueueName, true, consumer);
+        // 打开消息应答，不自动确认接收消息，手动确认接收到消息
+        getOpenChannel().basicConsume(this.consumeQueueName, false, consumer);
         System.out.println("创建接收监听");
-	}
-	
-	
-//	private String failureRetryTemporaryQueueName = null;
-	/**
-	 * 消息消费失败，重试，重新投递到延迟队列中
-	 * @param msg 要发送的消息字符串
-	 * @param delayTime 延迟时间，单位是秒
-	 */
-	public void failureRetry(BasicProperties properties, byte[] body) throws Exception{
-        Map<String, Object> headers = null;
-        String delayQueue = null;	//死信队列，用来做延迟的，将消息重新投递到这里
-        System.out.println("---");
-        try {
-            headers = properties.getHeaders();
-            if (headers != null) {
-                if (headers.containsKey("x-death")) {
-                    List<Map<String, Object>> deaths = (List<Map<String, Object>>) headers.get("x-death");
-                    if (deaths.size() > 0) {
-                    	Map<String, Object> death = deaths.get(0);
-                    	delayQueue = death.get("queue").toString();
-                    	System.out.println("原本的queue："+delayQueue);
-                    }
-                }
-            }
-        } catch (Exception e) {
-        	e.printStackTrace();
-        }
-        
-//		getChannel().queueDeclare(queueDelayName, true, false, false, args);
-		// 当声明队列，不加任何参数，产生的将是一个临时队列，getQueue返回的是队列名称
-//        String temporaryQueueName = getChannel().queueDeclare().getQueue();
-        //getChannel().queueDeclare(temporaryQueueName, true, false, false, null);
-//		getChannel().basicPublish("", this.routingKey, properties, body);
-		getChannel().basicPublish(this.delayExchangeName, this.routingKey, properties, body);
 	}
 }

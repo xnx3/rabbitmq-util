@@ -35,13 +35,6 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/ma
 
 	<dependencies>
 		
-		<!-- 添加 xnx3-util 支持 -->
-		<dependency>
-		  <groupId>com.xnx3.util</groupId>
-		  <artifactId>xnx3-util</artifactId>
-		  <version>1.0.0</version>
-		</dependency>
-		
 		<!-- rabbitmq -->
 		<dependency>
 		  <groupId>com.rabbitmq</groupId>
