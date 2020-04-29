@@ -53,8 +53,8 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/ma
 				 <version>2.4</version>
 				<configuration>
 					<excludes>
-						<exclude>**/com/xnx3/demo/*</exclude>
-					</excludes>
+            			<exclude>**/com/xnx3/demo/**</exclude>
+          			</excludes>
 				</configuration>
 			</plugin>
 		</plugins>

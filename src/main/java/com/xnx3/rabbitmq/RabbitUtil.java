@@ -16,7 +16,10 @@ import com.rabbitmq.client.Envelope;
  *
  */
 public class RabbitUtil {
-	public static final String EXCHANGE_NAME = "wangmarket_topic";
+	/**
+	 * @deprecated
+	 */
+	public static final String EXCHANGE_NAME = "";
 	
     public ConnectionFactory factory = null;	//创建连接工厂
     public Connection connection = null;	//链接
@@ -37,6 +40,17 @@ public class RabbitUtil {
 	 * @param port 端口号，默认为 5672
 	 */
 	public RabbitUtil(String host, String username, String password, int port) {
+		setParam(host, username, password, port);
+	}
+	
+	/**
+	 * 设置RabbitMQ相关信息
+	 * @param host rabbitMQ所在的ip，如 100.51.15.10
+	 * @param username rabbitMQ登陆的username，如rabbitMQ安装后默认的账户 guest
+	 * @param password 登陆密码
+	 * @param port 端口号，默认为 5672
+	 */
+	public void setParam(String host, String username, String password, int port){
 		factory = new ConnectionFactory();
 		//设置RabbitMQ相关信息
 	    factory.setHost(host);
@@ -62,20 +76,16 @@ public class RabbitUtil {
 	}
 	
 	/**
-	 * 获取一个通道
-	 * @return
+	 * 获取通道
 	 * @throws IOException 
 	 * @throws TimeoutException 
 	 */
 	public Channel getChannel() throws IOException, TimeoutException{
 		if(channel == null || !channel.isOpen()){
 			channel = getConnection().createChannel();
-			//声明一个topic交换类型
-	        channel.exchangeDeclare(EXCHANGE_NAME, "topic");
 		}
 		return channel;
 	}
-	
 
 	/**
 	 * 关闭通道
