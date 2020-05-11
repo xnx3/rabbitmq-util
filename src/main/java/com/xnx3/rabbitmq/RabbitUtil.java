@@ -19,7 +19,7 @@ public class RabbitUtil {
 	/**
 	 * @deprecated
 	 */
-	public static final String EXCHANGE_NAME = "";
+	public static final String EXCHANGE_NAME = "amq.direct";
 	
     public ConnectionFactory factory = null;	//创建连接工厂
     public Connection connection = null;	//链接
